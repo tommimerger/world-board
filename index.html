@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>World Board (No Email/Weather/Slack/Maps)</title>
+  <link rel="preload" href="styles.css" as="style" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main id="app" class="app" aria-live="polite">
+    <section id="slide" class="slide" role="group" aria-label="City slide">
+      <!-- Populated by app.js -->
+    </section>
+
+    <nav class="controls" aria-label="Controls">
+      <button id="prevBtn" class="btn" title="Previous (←)" aria-label="Previous">◀</button>
+      <button id="pauseBtn" class="btn" title="Pause/Resume (Space)" aria-label="Pause">❚❚</button>
+      <button id="nextBtn" class="btn" title="Next (→)" aria-label="Next">▶</button>
+      <button id="fsBtn"    class="btn" title="Toggle Fullscreen (F)" aria-label="Fullscreen">⤢</button>
+    </nav>
+
+    <div id="progress" class="progress"><span id="bar" class="bar"></span></div>
+  </main>
+
+  <script src="config.js"></script>
+  <script src="app.js" defer></script>
+</body>
+</html>
