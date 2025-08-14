@@ -3,27 +3,312 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>World Board (No Email/Weather/Slack/Maps)</title>
-  <link rel="preload" href="styles.css" as="style" />
-  <link rel="stylesheet" href="styles.css" />
+  <title>City Board (Offline, PNG-first)</title>
+  <style>
+    :root{
+      --bg:#0e0f13;
+      --card:#151821;
+      --ink:#e9eef6;
+      --muted:#9aa6b2;
+      --accent:#5aa9ff;
+      --radius:14px;
+      --gap:16px;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      background:linear-gradient(180deg,#0d0f13 0%, #0f1117 100%);
+      color:var(--ink);
+      font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial,sans-serif;
+    }
+    header{
+      position:sticky; top:0; z-index:5;
+      display:flex; align-items:center; justify-content:space-between;
+      padding:16px clamp(16px,4vw,28px);
+      background:linear-gradient(180deg, rgba(15,17,23,.9), rgba(15,17,23,.6) 60%, rgba(15,17,23,0));
+      backdrop-filter: blur(8px);
+      border-bottom:1px solid #1f2430;
+    }
+    .brand{font-weight:600; letter-spacing:.2px}
+    .controls{display:flex; gap:8px; flex-wrap:wrap}
+    button{
+      appearance:none; border:1px solid #2a3240; color:var(--ink);
+      background:#131722; padding:10px 14px; border-radius:10px;
+      cursor:pointer; transition:.15s ease-in-out; font-weight:500;
+    }
+    button:hover{border-color:#3a4557}
+    button[data-active="true"]{border-color:var(--accent);}
+    main{padding:24px clamp(16px,4vw,28px) 32px;}
+    .grid{
+      display:grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px,1fr));
+      gap:var(--gap);
+      align-items:stretch;
+    }
+    .card{
+      background:var(--card); border:1px solid #1a1f2b;
+      border-radius:var(--radius); overflow:hidden; position:relative;
+      display:flex; flex-direction:column; min-height:240px;
+      box-shadow: 0 10px 24px rgba(0,0,0,.25);
+    }
+    .pic{
+      position:relative; flex:1; background:#0b0d12; display:flex; align-items:center; justify-content:center;
+    }
+    .pic img{
+      width:100%; height:100%; object-fit:cover; display:block;
+    }
+    .label{
+      padding:12px 14px; display:flex; align-items:center; justify-content:space-between;
+      border-top:1px solid #1a1f2b; background:linear-gradient(180deg,#141823,#111620);
+    }
+    .city{font-weight:600}
+    .ext{color:var(--muted); font-size:.85rem}
+    /* Slideshow */
+    .stage{
+      position:relative; width:100%; height:min(78vh, calc(100vh - 140px));
+      background:#0b0d12; border:1px solid #1a1f2b; border-radius:var(--radius);
+      overflow:hidden; display:none; margin-bottom:18px;
+      box-shadow: 0 10px 24px rgba(0,0,0,.25);
+    }
+    .stage img{
+      position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
+    }
+    .stage .caption{
+      position:absolute; left:12px; bottom:12px;
+      background:rgba(9,11,16,.55); padding:10px 12px;
+      border:1px solid rgba(255,255,255,.12); border-radius:10px; backdrop-filter: blur(6px);
+      display:flex; gap:10px; align-items:center;
+    }
+    .stage .caption .name{font-weight:650}
+    .stage .controls{
+      position:absolute; right:12px; bottom:12px; display:flex; gap:8px;
+      background:rgba(9,11,16,.55); padding:8px; border:1px solid rgba(255,255,255,.12);
+      border-radius:10px; backdrop-filter: blur(6px);
+    }
+    .hint{color:var(--muted); font-size:.9rem; margin-top:-6px; margin-bottom:14px;}
+    /* mode states */
+    [data-mode="grid"] .grid{display:grid}
+    [data-mode="grid"] .stage{display:none}
+    [data-mode="slideshow"] .grid{display:none}
+    [data-mode="slideshow"] .stage{display:block}
+  </style>
 </head>
-<body>
-  <main id="app" class="app" aria-live="polite">
-    <section id="slide" class="slide" role="group" aria-label="City slide">
-      <!-- Populated by app.js -->
+<body data-mode="grid">
+  <header>
+    <div class="brand">City Board — Offline (.PNG-first)</div>
+    <div class="controls">
+      <button id="gridBtn" title="Grid view" data-active="true">Grid</button>
+      <button id="slideBtn" title="Slideshow view">Slideshow</button>
+      <button id="playBtn" title="Play/Pause slideshow (Space)">Play ▷</button>
+      <button id="prevBtn" title="Previous (←)">Prev</button>
+      <button id="nextBtn" title="Next (→)">Next</button>
+      <button id="fullBtn" title="Toggle Fullscreen (F)">Fullscreen</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="hint">No network calls. No email, weather, Slack, geocoding, or Google Maps. Images are read from <code>./images/</code>. This build prefers <code>.PNG</code> and falls back if needed.</div>
+
+    <!-- Slideshow stage -->
+    <section class="stage" id="stage">
+      <img id="stageImg" alt="" />
+      <div class="caption">
+        <div class="name" id="stageName">—</div>
+        <div class="ext" id="stageExt">—</div>
+      </div>
+      <div class="controls">
+        <button id="sPrev">◀</button>
+        <button id="sPlay">▶</button>
+        <button id="sNext">▶</button>
+      </div>
     </section>
 
-    <nav class="controls" aria-label="Controls">
-      <button id="prevBtn" class="btn" title="Previous (←)" aria-label="Previous">◀</button>
-      <button id="pauseBtn" class="btn" title="Pause/Resume (Space)" aria-label="Pause">❚❚</button>
-      <button id="nextBtn" class="btn" title="Next (→)" aria-label="Next">▶</button>
-      <button id="fsBtn"    class="btn" title="Toggle Fullscreen (F)" aria-label="Fullscreen">⤢</button>
-    </nav>
-
-    <div id="progress" class="progress"><span id="bar" class="bar"></span></div>
+    <!-- Grid -->
+    <section class="grid" id="grid"></section>
   </main>
 
-  <script src="config.js"></script>
-  <script src="app.js" defer></script>
+  <script>
+    // ---- CONFIG ----
+    const CONFIG = {
+      imageDir: './images',          // Where your images live
+      intervalMs: 8000,              // Slideshow interval
+      autoplay: false,               // Slideshow starts paused
+      // List your cities here; "file" is optional if the filename matches the slug rules.
+      cities: [
+        { name: 'New York City', slug: 'NYC' },     // → tries NYC.PNG first
+        { name: 'London' },                         // → tries LONDON.PNG first
+        { name: 'Singapore' },                      // → tries SINGAPORE.PNG first
+        { name: 'United Arab Emirates', slug: 'UAE' },
+        { name: 'Helsinki' },
+        { name: 'Houston' },
+        { name: 'Boise' },
+        // Add more here…
+        // { name: 'Paris', file: 'Paris-Center.PNG' }, // explicit file example
+      ],
+    };
+
+    // ---- HELPERS ----
+    const $ = sel => document.querySelector(sel);
+    const $$ = sel => Array.from(document.querySelectorAll(sel));
+    const toSlug = s => s.trim().toUpperCase().replace(/\s+/g,'_').replace(/[^\w\-]/g,'');
+
+    function candidateFiles(city){
+      // Priority: PNG (.PNG then .png), then JPG/JPEG
+      if (city.file) return [city.file];
+      const base = city.slug ? city.slug : toSlug(city.name);
+      return [
+        `${base}.PNG`, `${base}.png`,
+        `${base}.JPG`, `${base}.JPEG`, `${base}.jpg`, `${base}.jpeg`
+      ];
+    }
+
+    function withDir(file){ return `${CONFIG.imageDir.replace(/\/+$/,'')}/${file}`; }
+
+    // Sets an <img> src with cascading fallbacks based on onerror
+    function setSrcWithFallback(imgEl, files){
+      let i = 0;
+      function tryNext(){
+        if (i >= files.length){ imgEl.alt = 'Image not found'; return; }
+        const next = withDir(files[i++]);
+        imgEl.dataset.currentFile = files[i-1];
+        imgEl.src = next;
+      }
+      imgEl.onerror = tryNext;
+      tryNext();
+    }
+
+    // ---- BUILD GRID ----
+    const gridEl = $('#grid');
+    const stage = $('#stage');
+    const stageImg = $('#stageImg');
+    const stageName = $('#stageName');
+    const stageExt = $('#stageExt');
+
+    const model = CONFIG.cities.map((c, idx) => {
+      const files = candidateFiles(c);
+      return {
+        index: idx,
+        name: c.name,
+        files,
+        currentFile: files[0]
+      };
+    });
+
+    function buildGrid(){
+      gridEl.innerHTML = '';
+      for (const c of model){
+        const card = document.createElement('article');
+        card.className = 'card';
+        card.innerHTML = `
+          <div class="pic"><img alt=""></div>
+          <div class="label">
+            <div class="city">${c.name}</div>
+            <div class="ext"></div>
+          </div>`;
+        const img = card.querySelector('img');
+        const ext = card.querySelector('.ext');
+        setSrcWithFallback(img, c.files);
+        img.addEventListener('load', () => {
+          const file = img.dataset.currentFile || c.files[0];
+          c.currentFile = file;
+          ext.textContent = file.split('.').pop().toUpperCase();
+        });
+        card.addEventListener('click', () => {
+          // Jump into slideshow at this city
+          current = c.index;
+          showSlide(current);
+          setMode('slideshow');
+        });
+        gridEl.appendChild(card);
+      }
+    }
+
+    // ---- SLIDESHOW ----
+    let current = 0;
+    let timer = null;
+    let playing = !!CONFIG.autoplay;
+
+    function showSlide(idx){
+      const c = model[(idx+model.length)%model.length];
+      current = c.index;
+      stageName.textContent = c.name;
+      // Assign and resolve file with fallbacks
+      setSrcWithFallback(stageImg, c.files);
+      stageImg.addEventListener('load', () => {
+        const file = stageImg.dataset.currentFile || c.files[0];
+        stageExt.textContent = file.split('.').pop().toUpperCase();
+      }, {once:true});
+    }
+
+    function play(){
+      if (timer) return;
+      timer = setInterval(()=> next(), CONFIG.intervalMs);
+      playing = true;
+      updatePlayButtons();
+    }
+    function pause(){
+      if (timer){ clearInterval(timer); timer = null; }
+      playing = false;
+      updatePlayButtons();
+    }
+    function togglePlay(){ playing ? pause() : play(); }
+    function next(){ showSlide(current+1); }
+    function prev(){ showSlide(current-1); }
+
+    function updatePlayButtons(){
+      $('#playBtn').textContent = playing ? 'Pause ❚❚' : 'Play ▷';
+      $('#sPlay').textContent  = playing ? '❚❚' : '▶';
+    }
+
+    // ---- MODE TOGGLE ----
+    function setMode(mode){
+      document.body.dataset.mode = mode;
+      $('#gridBtn').dataset.active = (mode==='grid');
+      $('#slideBtn').dataset.active = (mode==='slideshow');
+      if (mode==='slideshow'){
+        showSlide(current);
+        if (CONFIG.autoplay && !playing) play();
+      } else {
+        pause();
+      }
+    }
+
+    // ---- FULLSCREEN ----
+    async function toggleFullscreen(){
+      if (!document.fullscreenElement){
+        await document.documentElement.requestFullscreen().catch(()=>{});
+      } else {
+        await document.exitFullscreen().catch(()=>{});
+      }
+    }
+
+    // ---- INIT ----
+    buildGrid();
+    setMode('grid');
+    updatePlayButtons();
+
+    // ---- UI WIRES ----
+    $('#gridBtn').addEventListener('click', () => setMode('grid'));
+    $('#slideBtn').addEventListener('click', () => setMode('slideshow'));
+    $('#playBtn').addEventListener('click', togglePlay);
+    $('#prevBtn').addEventListener('click', prev);
+    $('#nextBtn').addEventListener('click', next);
+    $('#fullBtn').addEventListener('click', toggleFullscreen);
+
+    $('#sPrev').addEventListener('click', prev);
+    $('#sPlay').addEventListener('click', togglePlay);
+    $('#sNext').addEventListener('click', next);
+
+    // Keyboard shortcuts
+    window.addEventListener('keydown', (e)=>{
+      if (e.code === 'Space'){ e.preventDefault(); togglePlay(); }
+      if (e.key === 'ArrowRight') next();
+      if (e.key === 'ArrowLeft')  prev();
+      if (e.key.toLowerCase() === 'f') toggleFullscreen();
+      if (e.key.toLowerCase() === 'g') setMode('grid');
+      if (e.key.toLowerCase() === 's') setMode('slideshow');
+    });
+  </script>
 </body>
 </html>
