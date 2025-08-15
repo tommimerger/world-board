@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>World Clocks Sidebar</title>
+<style>
+  :root{
+    --bg:#101215; --text:#eef1f6;
+    --gap:10px; --radius:18px;
+  }
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:"Aptos",system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;
+    -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+  }
+
+  .wrap{max-width:1120px;margin:10px auto 12px;padding:0 12px}
+  .date-row{text-align:center;font-size:22px;font-weight:800;margin-bottom:10px}
+
+  /* Cards */
+  .cards{display:grid;grid-template-columns:repeat(5,1fr);gap:var(--gap)}
+  .card{
+    position:relative;height:160px;border-radius:var(--radius);overflow:hidden;
+    box-shadow:0 8px 22px rgba(0,0,0,.25);
+  }
+  /* Background image per card: default exposure ~ -35%; per-card override via --bright */
+  .card::before{
+    content:"";position:absolute;inset:0;background:var(--bgimg) center/cover no-repeat;
+    filter:brightness(var(--bright, .65));
+  }
+  .card::after{
+    content:"";position:absolute;inset:0;
+    background:linear-gradient(180deg,rgba(0,0,0,.10),rgba(0,0,0,.45) 60%,rgba(0,0,0,.65));
+  }
+  .inner{
+    position:absolute;inset:0;display:flex;flex-direction:column;gap:6px;
+    align-items:center;justify-content:flex-start;padding:12px 10px 8px;z-index:1;text-align:center
+  }
+  .city{font-size:24px;font-weight:900;letter-spacing:.2px;text-shadow:0 2px 10px #0009}
+  .time{font-size:28px;font-weight:900;margin-top:-2px}
+  .meta{font-size:12px;color:#dbe2ee;font-weight:800}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;justify-content:center}
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:0;background:transparent;
+        font-size:12px;color:#f3f6fb;text-shadow:0 2px 8px #000a;border:none;font-weight:800}
+
+  /* Timeline styling with plain background (removed world image to avoid missing asset) */
+  .timeline{position:relative;margin-top:12px;border-radius:var(--radius);overflow:hidden;border:1px solid #ffffff18;
+            background:rgba(255,255,255,0.02);}
+  .timeline::after{
+    content:"";position:absolute;inset:0;
+    background:linear-gradient(180deg,rgba(10,12,15,.10),rgba(10,12,15,.20));
+    z-index:1;
+  }
+  .timeline-inner{position:relative;z-index:2}
+
+  /* Timeline grid: narrow city label + five columns (±2 hours + now) */
+  .row{display:grid;grid-template-columns:86px repeat(5,1fr);align-items:stretch;background:transparent}
+  .row + .row{border-top:1px solid #ffffff18}
+  .label{padding:8px 8px;display:flex;align-items:center;justify-content:flex-start;border-right:1px solid #ffffff18}
+  .name{font-weight:900;letter-spacing:.2px;text-shadow:0 1px 8px #000c}
+  .cell{display:flex;align-items:center;justify-content:center;padding:12px 0}
+  .hr{font-size:20px;letter-spacing:.2px;color:#f3f7ff;font-weight:600;text-shadow:0 2px 10px #000c}
+  .cell.now .hr{font-weight:900;color:#ffffff;text-shadow:0 2px 12px #000e}
+
+  /* Narrow screens */
+  @media (max-width:760px){
+    .cards{grid-template-columns:1fr}
+    .card{height:170px}
+    .city{font-size:26px}
+    .time{font-size:32px}
+    .meta{font-size:13px}
+    .chip{font-size:13px}
+    .row{grid-template-columns:78px repeat(5,1fr)}
+    .hr{font-size:22px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div id="topDate" class="date-row">Loading…</div>
+  <div class="cards" id="cards"></div>
+  <div class="timeline"><div class="timeline-inner" id="timeline"></div></div>
+</div>
+
+<script>
+/* Order: Boise, New York, London, Helsinki, Singapore */
+const CITIES = [
+  { key:"boise",     name:"Boise",      tz:"America/Boise",      img:"BOISE.png",      lat:43.615,  lon:-116.2023, bright:.65 },
+  { key:"newyork",   name:"New York",   tz:"America/New_York",   img:"NYC.png",        lat:40.7128, lon:-74.0060,  bright:.65 },
+  { key:"london",    name:"London",     tz:"Europe/London",      img:"LONDON.png",     lat:51.5074, lon:-0.1278,   bright:.65 },
+  { key:"helsinki",  name:"Helsinki",    tz:"Europe/Helsinki",    img:"HELSINKI.png",   lat:60.1699, lon:24.9384,   bright:.65 },
+  /* Singapore slightly darker than others */
+  { key:"singapore", name:"Singapore",  tz:"Asia/Singapore",     img:"SINGAPORE.png",  lat:1.3521,  lon:103.8198,  bright:.55 }
+];
+
+/* Timeline window: Singapore reference, +/-2 hours */
+const SG_TZ = "Asia/Singapore";
+const RANGE_HOURS = 2; // 5 columns centered on now
+
+/* Formatters */
+function formatTopDate(d){
+  const fmt = new Intl.DateTimeFormat("en-GB",{weekday:"long", day:"2-digit", month:"long", year:"numeric"});
+  const parts = fmt.formatToParts(d);
+  const wk = parts.find(p=>p.type==="weekday").value;
+  const day = parts.find(p=>p.type==="day").value;
+  const mon = parts.find(p=>p.type==="month").value;
+  const yr  = parts.find(p=>p.type==="year").value;
+  return `${wk}, ${day} ${mon} ${yr}`;
+}
+function formatClock(d, timeZone){
+  const parts = new Intl.DateTimeFormat("en-GB",{timeZone, hour12:true, hour:"numeric", minute:"2-digit"}).formatToParts(d);
+  let h="", m="", ap="";
+  for(const p of parts){ if(p.type==="hour")h=p.value; if(p.type==="minute")m=p.value; if(p.type==="dayPeriod")ap=p.value; }
+  return `${h}:${m} ${ap.toUpperCase()}`;
+}
+function offsetHoursBetween(date, tzA, tzB){
+  function parts(ts, tz){
+    const p = new Intl.DateTimeFormat("en-US",{timeZone:tz,hour12:false,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit"}).formatToParts(ts);
+    const m={}; for(const {type,value} of p){ m[type]=value }
+    return {y:+m.year,m:+m.month,d:+m.day,hh:+m.hour,mm:+m.minute,ss:+m.second};
+  }
+  const a=parts(date,tzA), b=parts(date,tzB);
+  return Math.round((Date.UTC(a.y,a.m-1,a.d,a.hh,a.mm,a.ss) - Date.UTC(b.y,b.m-1,b.d,b.hh,b.mm,b.ss))/3600000);
+}
+function hourShort(h24){ const h12=((h24+11)%12)+1; return h24<12?`${h12}AM`:`${h12}PM`; }
+
+/* Cards */
+function renderCards(now){
+  const holder=document.getElementById("cards"); holder.innerHTML="";
+  CITIES.forEach(c=>{
+    const card=document.createElement("div"); card.className="card";
+    card.style.setProperty("--bgimg", `url('${c.img}')`);
+    card.style.setProperty("--bright", String(c.bright ?? .65));
+    const inner=document.createElement("div"); inner.className="inner";
+    const city=document.createElement("div"); city.className="city"; city.textContent=c.name;
+    const time=document.createElement("div"); time.className="time"; time.textContent=formatClock(now,c.tz);
+    const diff=offsetHoursBetween(now,c.tz,SG_TZ);
+    const meta=document.createElement("div"); meta.className="meta";
+    meta.textContent= diff===0 ? "same as Singapore" : (diff>0?`+${diff} hours ahead of Singapore`:`${diff} hours behind Singapore`);
+    const chips=document.createElement("div"); chips.className="chips";
+    const sr=document.createElement("div"); sr.className="chip"; sr.id=`sunrise-${c.key}`; sr.textContent="Sunrise …";
+    const ss=document.createElement("div"); ss.className="chip"; ss.id=`sunset-${c.key}`;  ss.textContent="Sunset …";
+    const wx=document.createElement("div"); wx.className="chip"; wx.id=`wx-${c.key}`; wx.textContent="Weather …";
+    chips.append(sr,ss,wx); inner.append(city,time,meta,chips); card.append(inner); holder.append(card);
+  });
+}
+
+/* Timeline helpers */
+function buildHours(now){
+  const sgHour = parseInt(new Intl.DateTimeFormat("en-GB",{timeZone:SG_TZ,hour12:false,hour:"2-digit"}).format(now),10);
+  const hours=[]; for(let i=-RANGE_HOURS;i<=RANGE_HOURS;i++){ hours.push((sgHour+i+24)%24); }
+  return {hours, nowIndex:RANGE_HOURS};
+}
+
+function renderTimeline(now){
+  const tl=document.getElementById("timeline"); tl.innerHTML="";
+  const {hours, nowIndex} = buildHours(now);
+
+  CITIES.forEach(city=>{
+    const row=document.createElement("div"); row.className="row";
+    const label=document.createElement("div"); label.className="label";
+    label.innerHTML=`<div class="name">${city.name}</div>`;
+    row.append(label);
+
+    const diff=offsetHoursBetween(now,city.tz,SG_TZ);
+    hours.forEach((h,i)=>{
+      const cityHour=((h+diff)%24+24)%24;
+      const cell=document.createElement("div"); cell.className="cell "+(i===nowIndex?"now":"");
+      const span=document.createElement("span"); span.className="hr"; span.textContent=hourShort(cityHour);
+      cell.append(span); row.append(cell);
+    });
+    tl.append(row);
+  });
+}
+
+/* Weather for sunrise, sunset, weather chips */
+function isoDateInZone(date, tz){
+  const p = new Intl.DateTimeFormat("en-CA",{timeZone:tz,year:"numeric",month:"2-digit",day:"2-digit"}).format(date);
+  return p;
+}
+function fmtHMM(h, m){
+  const ap = h<12 ? "AM" : "PM"; const hr = ((h+11)%12)+1;
+  return `${hr}:${String(m).padStart(2,"0")} ${ap}`;
+}
+async function hydrateFromOpenMeteo(){
+  const jobs = CITIES.map(async c=>{
+    try{
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${c.lat}&longitude=${c.lon}`
+        + `&current=temperature_2m,weather_code`
+        + `&daily=sunrise,sunset`
+        + `&past_days=1&forecast_days=2`
+        + `&timezone=${encodeURIComponent(c.tz)}`;
+      const res = await fetch(url);
+      const data = await res.json();
+
+      const byDate = {};
+      for(let i=0;i<data.daily.time.length;i++){
+        const iso = data.daily.time[i];
+        const srStr = data.daily.sunrise[i].split("T")[1];
+        const ssStr = data.daily.sunset[i].split("T")[1];
+        const [srH,srM] = srStr.split(":" ).map(n=>parseInt(n,10));
+        const [ssH,ssM] = ssStr.split(":" ).map(n=>parseInt(n,10));
+        byDate[iso] = { srH, srM, ssH, ssM };
+      }
+
+      const code = data.current.weather_code;
+      const temp = Math.round(data.current.temperature_2m);
+      const desc = ({
+        0:"Clear",1:"Mainly clear",2:"Partly cloudy",3:"Overcast",45:"Fog",48:"Rime fog",
+        51:"Light drizzle",53:"Drizzle",55:"Heavy drizzle",
+        61:"Light rain",63:"Rain",65:"Heavy rain",
+        71:"Light snow",73:"Snow",75:"Heavy snow",
+        80:"Rain showers",81:"Rain showers",82:"Violent showers",
+        95:"Thunderstorm",96:"Thunderstorm hail",99:"Thunderstorm hail"
+      })[code] || "Weather";
+
+      const todayIso = isoDateInZone(new Date(), c.tz);
+      const s = byDate[todayIso] || {srH:6,srM:0,ssH:18,ssM:0};
+      document.getElementById(`sunrise-${c.key}`).textContent = `Sunrise ${fmtHMM(s.srH, s.srM)}`;
+      document.getElementById(`sunset-${c.key}`).textContent  = `Sunset ${fmtHMM(s.ssH, s.ssM)}`;
+      document.getElementById(`wx-${c.key}`).textContent      = `${desc}, ${temp}°C`;
+    }catch(e){
+      document.getElementById(`sunrise-${c.key}`).textContent = "Sunrise 6:00 AM";
+      document.getElementById(`sunset-${c.key}`).textContent  = "Sunset 6:00 PM";
+      document.getElementById(`wx-${c.key}`).textContent      = "Weather N/A";
+    }
+  });
+
+  await Promise.all(jobs);
+}
+
+/* Tick */
+function tick(){
+  const now=new Date();
+  document.getElementById("topDate").textContent=formatTopDate(now);
+  renderCards(now);
+  renderTimeline(now);
+  hydrateFromOpenMeteo();
+}
+
+// Initial call and update every minute
+
+tick();
+setInterval(tick, 60*1000);
+</script>
+</body>
+</html>
