@@ -1,325 +1,350 @@
 <!doctype html>
-<!--
-  World Board — Offline, no network calls.
-  This page presents a set of city photographs in both grid and slideshow modes.
-  It uses only local assets (.PNG images) and does not depend on any external
-  APIs or network resources. All controls and logic are implemented in
-  vanilla HTML, CSS and JavaScript.
-
-  To adjust the board, edit the CONFIG object in the script section at the
-  bottom of this file. You can change the rotation interval, add or remove
-  cities, customise slugs or filenames, and decide whether the slideshow
-  should autoplay when first opened. When adding a new city, drop a PNG
-  photograph into the images/ directory and add an entry to the `cities`
-  array. The slug will be used to infer the file name (e.g. slug
-  "NYC" maps to "NYC.PNG"). If your file name does not match the slug,
-  specify the `file` property explicitly.
--->
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>City Board (Offline, PNG‑first)</title>
+  <title>World Board – Live Times & Weather</title>
+  <!--
+    This page displays live local times, relative timezone offsets, sunrise and sunset
+    information, and current weather conditions for a set of cities relative to
+    Singapore. Weather data and sunrise/sunset times are fetched from the
+    open‑source Open‑Meteo API (https://open-meteo.com) and do not require an API key.
+
+    The Luxon library is used for robust timezone handling and daylight savings
+    calculations. See https://moment.github.io/luxon/ for details.
+  -->
   <style>
     :root{
-      --bg:#0e0f13;
-      --card:#151821;
-      --ink:#e9eef6;
-      --muted:#9aa6b2;
-      --accent:#5aa9ff;
-      --radius:14px;
+      --bg:#0f1117;
+      --card-bg:#141923;
+      --card-fg:#e9eef6;
+      --muted:#99a3b2;
+      --primary:#5aa9ff;
+      --highlight:#1e61a3;
+      --border-radius:12px;
       --gap:16px;
     }
-    *{box-sizing:border-box}
-    html,body{height:100%}
+    *{box-sizing:border-box;margin:0;padding:0}
     body{
-      margin:0;
-      background:linear-gradient(180deg,#0d0f13 0%, #0f1117 100%);
-      color:var(--ink);
-      font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial,sans-serif;
+      font-family: system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial,sans-serif;
+      background:var(--bg);
+      color:var(--card-fg);
+      line-height:1.4;
+      padding:20px;
     }
-    header{
-      position:sticky; top:0; z-index:5;
-      display:flex; align-items:center; justify-content:space-between;
-      padding:16px clamp(16px,4vw,28px);
-      background:linear-gradient(180deg, rgba(15,17,23,.9), rgba(15,17,23,.6) 60%, rgba(15,17,23,0));
-      backdrop-filter: blur(8px);
-      border-bottom:1px solid #1f2430;
-    }
-    .brand{font-weight:600; letter-spacing:.2px}
-    .controls{display:flex; gap:8px; flex-wrap:wrap}
-    button{
-      appearance:none; border:1px solid #2a3240; color:var(--ink);
-      background:#131722; padding:10px 14px; border-radius:10px;
-      cursor:pointer; transition:.15s ease-in-out; font-weight:500;
-    }
-    button:hover{border-color:#3a4557}
-    button[data-active="true"]{border-color:var(--accent);}
-    main{padding:24px clamp(16px,4vw,28px) 32px;}
-    .grid{
+    h1{ font-size:1.6rem; margin-bottom:1rem; text-align:center; }
+    .cards{
       display:grid;
-      grid-template-columns: repeat(auto-fill, minmax(260px,1fr));
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap:var(--gap);
-      align-items:stretch;
+      margin-bottom:28px;
     }
     .card{
-      background:var(--card); border:1px solid #1a1f2b;
-      border-radius:var(--radius); overflow:hidden; position:relative;
-      display:flex; flex-direction:column; min-height:240px;
-      box-shadow: 0 10px 24px rgba(0,0,0,.25);
+      background:var(--card-bg);
+      border-radius:var(--border-radius);
+      position:relative;
+      overflow:hidden;
+      padding:16px 14px 20px;
+      box-shadow:0 6px 18px rgba(0,0,0,0.4);
     }
-    .pic{
-      position:relative; flex:1; background:#0b0d12; display:flex; align-items:center; justify-content:center;
+    .card .image{
+      position:absolute;
+      top:0; left:0; right:0; bottom:0;
+      background-size:cover;
+      background-position:center;
+      opacity:0.2;
+      pointer-events:none;
     }
-    .pic img{
-      width:100%; height:100%; object-fit:cover; display:block;
+    .card h2{
+      font-size:1.2rem;
+      margin-bottom:0.2rem;
+      font-weight:600;
     }
-    .label{
-      padding:12px 14px; display:flex; align-items:center; justify-content:space-between;
-      border-top:1px solid #1a1f2b; background:linear-gradient(180deg,#141823,#111620);
+    .card .time{font-size:1.5rem; font-weight:700; margin-bottom:0.3rem;}
+    .card .offset{font-size:0.9rem; color:var(--muted); margin-bottom:0.3rem;}
+    .card .sun{
+      font-size:0.9rem;
+      margin-bottom:0.3rem;
     }
-    .city{font-weight:600}
-    .ext{color:var(--muted); font-size:.85rem}
-    /* Slideshow */
-    .stage{
-      position:relative; width:100%; height:min(78vh, calc(100vh - 140px));
-      background:#0b0d12; border:1px solid #1a1f2b; border-radius:var(--radius);
-      overflow:hidden; display:none; margin-bottom:18px;
-      box-shadow: 0 10px 24px rgba(0,0,0,.25);
+    .card .weather{
+      font-size:0.9rem;
+      display:flex;
+      align-items:center;
+      gap:6px;
     }
-    .stage img{
-      position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
+    .weather-icon{
+      font-size:1.2rem;
     }
-    .stage .caption{
-      position:absolute; left:12px; bottom:12px;
-      background:rgba(9,11,16,.55); padding:10px 12px;
-      border:1px solid rgba(255,255,255,.12); border-radius:10px; backdrop-filter: blur(6px);
-      display:flex; gap:10px; align-items:center;
+    .timeline{
+      overflow-x:auto;
+      border-collapse:collapse;
+      width:100%;
+      font-size:0.85rem;
     }
-    .stage .caption .name{font-weight:650}
-    .stage .controls{
-      position:absolute; right:12px; bottom:12px; display:flex; gap:8px;
-      background:rgba(9,11,16,.55); padding:8px; border:1px solid rgba(255,255,255,.12);
-      border-radius:10px; backdrop-filter: blur(6px);
+    .timeline th,
+    .timeline td{
+      border:1px solid #202431;
+      padding:6px 4px;
+      text-align:center;
+      min-width:50px;
     }
-    .hint{color:var(--muted); font-size:.9rem; margin-top:-6px; margin-bottom:14px;}
-    /* mode states */
-    [data-mode="grid"] .grid{display:grid}
-    [data-mode="grid"] .stage{display:none}
-    [data-mode="slideshow"] .grid{display:none}
-    [data-mode="slideshow"] .stage{display:block}
+    .timeline th.city-name{
+      position:sticky;
+      left:0;
+      background:var(--card-bg);
+      z-index:2;
+      width:150px;
+    }
+    .timeline td.current{
+      background:var(--highlight);
+      color:#fff;
+    }
+    .timeline tbody tr:nth-child(odd) td.city-name{
+      background:#171c27;
+    }
   </style>
 </head>
-<body data-mode="grid">
-  <header>
-    <div class="brand">City Board — Offline (.PNG‑first)</div>
-    <div class="controls">
-      <button id="gridBtn" title="Grid view" data-active="true">Grid</button>
-      <button id="slideBtn" title="Slideshow view">Slideshow</button>
-      <button id="playBtn" title="Play/Pause slideshow (Space)">Play ▷</button>
-      <button id="prevBtn" title="Previous (←)">Prev</button>
-      <button id="nextBtn" title="Next (→)">Next</button>
-      <button id="fullBtn" title="Toggle Fullscreen (F)">Fullscreen</button>
-    </div>
-  </header>
+<body>
+  <h1 id="dateHeading">Loading date…</h1>
+  <div id="cards" class="cards"></div>
+  <table id="timeline" class="timeline"></table>
 
-  <main>
-    <div class="hint">No network calls. No email, weather, Slack, geocoding, or Google Maps. Images are read from the <code>images</code> directory. This build prefers <code>.PNG</code> and falls back to common JPEG variants.</div>
-
-    <!-- Slideshow stage -->
-    <section class="stage" id="stage">
-      <img id="stageImg" alt="" />
-      <div class="caption">
-        <div class="name" id="stageName">—</div>
-        <div class="ext" id="stageExt">—</div>
-      </div>
-      <div class="controls">
-        <button id="sPrev">◀</button>
-        <button id="sPlay">▶</button>
-        <button id="sNext">▶</button>
-      </div>
-    </section>
-
-    <!-- Grid container -->
-    <section class="grid" id="grid"></section>
-  </main>
-
+  <!-- External library for timezone handling -->
+  <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
   <script>
-    // ---- CONFIG ----
-    // You can customise the rotation interval, autoplay behaviour and the list of
-    // cities below. The `slug` field maps to a file name in the images folder
-    // with a .PNG extension by default (case-sensitive). If your image
-    // filename differs, specify a `file` property instead of slug.
-    const CONFIG = {
-      imageDir: './images',          // where your images live relative to this HTML file
-      intervalMs: 8000,              // slideshow interval in milliseconds
-      autoplay: false,               // set true to start playing on load
-      cities: [
-        { name: 'New York City', slug: 'NYC' },
-        { name: 'London' },
-        { name: 'Singapore' },
-        { name: 'United Arab Emirates', slug: 'UAE' },
-        { name: 'Helsinki' },
-        { name: 'Houston' },
-        { name: 'Boise' },
-      ],
+    /*
+      List of cities with their names, timezones, latitude, longitude and image
+      paths. Coordinates are approximate and can be adjusted for greater
+      accuracy. The images folder must contain matching images (PNG or JPG).
+    */
+    const cities = [
+      { id:'boise',    name:'Boise',     tz:'America/Boise',    lat:43.615,  lon:-116.2023, image:'images/BOISE.PNG' },
+      { id:'houston',  name:'Houston',   tz:'America/Chicago',  lat:29.7604, lon:-95.3698,  image:'images/HOUSTON.PNG' },
+      { id:'newyork',  name:'New York',  tz:'America/New_York', lat:40.7128, lon:-74.0060,  image:'images/NYC.PNG' },
+      { id:'london',   name:'London',    tz:'Europe/London',    lat:51.5074, lon:-0.1278,   image:'images/LONDON.PNG' },
+      { id:'helsinki', name:'Helsinki',  tz:'Europe/Helsinki',  lat:60.1699, lon:24.9384,   image:'images/HELSINKI.PNG' },
+      { id:'uae',      name:'UAE',       tz:'Asia/Dubai',       lat:24.4539, lon:54.3773,   image:'images/UAE.PNG' },
+      { id:'singapore',name:'Singapore', tz:'Asia/Singapore',   lat:1.3521,  lon:103.8198,  image:'images/SINGAPORE.PNG' }
+    ];
+
+    // Mapping of weather codes from Open-Meteo to icons and descriptions
+    const weatherSymbols = {
+      0: { icon:'☀️', desc:'Clear' },
+      1: { icon:'🌤️', desc:'Mostly clear' },
+      2: { icon:'⛅', desc:'Partly cloudy' },
+      3: { icon:'☁️', desc:'Overcast' },
+      45: { icon:'🌫️', desc:'Fog' },
+      48: { icon:'🌫️', desc:'Rime fog' },
+      51: { icon:'🌦️', desc:'Light drizzle' },
+      53: { icon:'🌦️', desc:'Drizzle' },
+      55: { icon:'🌦️', desc:'Dense drizzle' },
+      61: { icon:'🌧️', desc:'Light rain' },
+      63: { icon:'🌧️', desc:'Rain' },
+      65: { icon:'🌧️', desc:'Heavy rain' },
+      71: { icon:'🌨️', desc:'Light snow' },
+      73: { icon:'🌨️', desc:'Snow' },
+      75: { icon:'🌨️', desc:'Heavy snow' },
+      95: { icon:'⛈️', desc:'Thunderstorm' },
+      96: { icon:'⛈️', desc:'Thunderstorm' },
+      99: { icon:'⛈️', desc:'Thunderstorm' }
     };
 
-    // ---- HELPERS ----
-    const $ = sel => document.querySelector(sel);
-    const $$ = sel => Array.from(document.querySelectorAll(sel));
-    const toSlug = s => s.trim().toUpperCase().replace(/\s+/g,'_').replace(/[^\w\-]/g,'');
-
-    // Determine candidate file names for a city
-    function candidateFiles(city){
-      if (city.file) return [city.file];
-      const base = city.slug ? city.slug : toSlug(city.name);
-      return [
-        `${base}.PNG`, `${base}.png`,
-        `${base}.JPG`, `${base}.JPEG`, `${base}.jpg`, `${base}.jpeg`
-      ];
-    }
-    function withDir(file){ return `${CONFIG.imageDir.replace(/\/+$/,'')}/${file}`; }
-
-    // Sets an <img> src with cascading fallbacks based on onerror
-    function setSrcWithFallback(imgEl, files){
-      let i = 0;
-      function tryNext(){
-        if (i >= files.length){ imgEl.alt = 'Image not found'; return; }
-        const next = withDir(files[i++]);
-        imgEl.dataset.currentFile = files[i-1];
-        imgEl.src = next;
+    // Fetch weather and sunrise/sunset information for a city using Open‑Meteo
+    async function fetchWeatherData(city){
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}&current_weather=true&daily=sunrise,sunset&timezone=${encodeURIComponent(city.tz)}&temperature_unit=celsius&forecast_days=1`;
+      try{
+        const response = await fetch(url);
+        const data = await response.json();
+        const weather = data.current_weather;
+        const daily = data.daily || {};
+        const sunrise = daily.sunrise ? daily.sunrise[0] : null;
+        const sunset  = daily.sunset  ? daily.sunset[0]  : null;
+        return {
+          temperature: weather ? weather.temperature : null,
+          code: weather ? weather.weathercode : null,
+          sunrise,
+          sunset
+        };
+      }catch(err){
+        console.error('Weather fetch failed for', city.name, err);
+        return { temperature:null, code:null, sunrise:null, sunset:null };
       }
-      imgEl.onerror = tryNext;
-      tryNext();
     }
 
-    // Build the grid of cards
-    const gridEl = $('#grid');
-    const stage = $('#stage');
-    const stageImg = $('#stageImg');
-    const stageName = $('#stageName');
-    const stageExt = $('#stageExt');
-
-    const model = CONFIG.cities.map((c, idx) => {
-      const files = candidateFiles(c);
-      return {
-        index: idx,
-        name: c.name,
-        files,
-        currentFile: files[0]
-      };
-    });
-
-    function buildGrid(){
-      gridEl.innerHTML = '';
-      for (const c of model){
-        const card = document.createElement('article');
+    // Build card elements in the DOM
+    function renderCards(){
+      const container = document.getElementById('cards');
+      container.innerHTML = '';
+      for(const city of cities){
+        const card = document.createElement('div');
         card.className = 'card';
-        card.innerHTML = `
-          <div class="pic"><img alt=""></div>
-          <div class="label">
-            <div class="city">${c.name}</div>
-            <div class="ext"></div>
-          </div>`;
-        const img = card.querySelector('img');
-        const ext = card.querySelector('.ext');
-        setSrcWithFallback(img, c.files);
-        img.addEventListener('load', () => {
-          const file = img.dataset.currentFile || c.files[0];
-          c.currentFile = file;
-          ext.textContent = file.split('.').pop().toUpperCase();
-        });
-        card.addEventListener('click', () => {
-          current = c.index;
-          showSlide(current);
-          setMode('slideshow');
-        });
-        gridEl.appendChild(card);
+        // background image overlay
+        const imageDiv = document.createElement('div');
+        imageDiv.className = 'image';
+        imageDiv.style.backgroundImage = `url('${city.image}')`;
+        card.appendChild(imageDiv);
+        // text content
+        const h2 = document.createElement('h2');
+        h2.textContent = city.name;
+        card.appendChild(h2);
+        const timeEl = document.createElement('div');
+        timeEl.className = 'time';
+        timeEl.id = `${city.id}-time`;
+        timeEl.textContent = '--:--';
+        card.appendChild(timeEl);
+        const offEl = document.createElement('div');
+        offEl.className = 'offset';
+        offEl.id = `${city.id}-offset`;
+        offEl.textContent = '';
+        card.appendChild(offEl);
+        const sunEl = document.createElement('div');
+        sunEl.className = 'sun';
+        sunEl.id = `${city.id}-sun`;
+        sunEl.textContent = '';
+        card.appendChild(sunEl);
+        const weatherEl = document.createElement('div');
+        weatherEl.className = 'weather';
+        weatherEl.id = `${city.id}-weather`;
+        weatherEl.textContent = '';
+        card.appendChild(weatherEl);
+        container.appendChild(card);
       }
     }
 
-    // Slideshow state
-    let current = 0;
-    let timer = null;
-    let playing = !!CONFIG.autoplay;
+    // Build the timeline table header and rows
+    function renderTimeline(){
+      const tbl = document.getElementById('timeline');
+      tbl.innerHTML = '';
+      // header row: blank cell + 24 columns for each hour
+      const head = document.createElement('thead');
+      const hrow = document.createElement('tr');
+      const blank = document.createElement('th');
+      blank.textContent = '';
+      blank.className = 'city-name';
+      hrow.appendChild(blank);
+      // create 24 hour headings from 0:00 to 23:00
+      for(let h=0; h<24; h++){
+        const th = document.createElement('th');
+        th.textContent = `${h}:00`;
+        hrow.appendChild(th);
+      }
+      head.appendChild(hrow);
+      tbl.appendChild(head);
+      // body rows: one per city
+      const tbody = document.createElement('tbody');
+      for(const city of cities){
+        const row = document.createElement('tr');
+        const nameCell = document.createElement('td');
+        nameCell.textContent = city.name;
+        nameCell.className = 'city-name';
+        row.appendChild(nameCell);
+        for(let h=0; h<24; h++){
+          const td = document.createElement('td');
+          td.id = `${city.id}-hour-${h}`;
+          td.textContent = '';
+          row.appendChild(td);
+        }
+        tbody.appendChild(row);
+      }
+      tbl.appendChild(tbody);
+    }
 
-    function showSlide(idx){
-      const c = model[(idx+model.length)%model.length];
-      current = c.index;
-      stageName.textContent = c.name;
-      setSrcWithFallback(stageImg, c.files);
-      stageImg.addEventListener('load', () => {
-        const file = stageImg.dataset.currentFile || c.files[0];
-        stageExt.textContent = file.split('.').pop().toUpperCase();
-      }, {once:true});
-    }
-    function play(){
-      if (timer) return;
-      timer = setInterval(() => next(), CONFIG.intervalMs);
-      playing = true;
-      updatePlayButtons();
-    }
-    function pause(){
-      if (timer){ clearInterval(timer); timer = null; }
-      playing = false;
-      updatePlayButtons();
-    }
-    function togglePlay(){ playing ? pause() : play(); }
-    function next(){ showSlide(current+1); }
-    function prev(){ showSlide(current-1); }
-    function updatePlayButtons(){
-      $('#playBtn').textContent = playing ? 'Pause ❚❚' : 'Play ▷';
-      $('#sPlay').textContent  = playing ? '❚❚' : '▶';
-    }
-
-    // View mode toggle
-    function setMode(mode){
-      document.body.dataset.mode = mode;
-      $('#gridBtn').dataset.active = (mode==='grid');
-      $('#slideBtn').dataset.active = (mode==='slideshow');
-      if (mode==='slideshow'){
-          showSlide(current);
-          if (CONFIG.autoplay && !playing) play();
-      } else {
-          pause();
+    // Update local time, offsets, sunrise/sunset and weather info periodically
+    function updateCards(){
+      const now = luxon.DateTime.now();
+      const sgOffset = now.setZone('Asia/Singapore').offset;
+      for(const city of cities){
+        const local = now.setZone(city.tz);
+        // format time
+        const timeEl = document.getElementById(`${city.id}-time`);
+        timeEl.textContent = local.toFormat('h:mm a');
+        // offset difference
+        const offDiff = (local.offset - sgOffset) / 60;
+        const offEl = document.getElementById(`${city.id}-offset`);
+        if(offDiff === 0){
+          offEl.textContent = 'same as Singapore';
+        } else {
+          const abs = Math.abs(offDiff);
+          const hours = abs % 1 === 0 ? abs : abs.toFixed(1);
+          offEl.textContent = `${hours} hour${abs>1 ? 's' : ''} ${offDiff > 0 ? 'ahead' : 'behind'} Singapore`;
+        }
+        // update sunrise/sunset times if available
+        const sunEl = document.getElementById(`${city.id}-sun`);
+        if(city.sunrise && city.sunset){
+          // parse times and convert to local zone string
+          const rise = luxon.DateTime.fromISO(city.sunrise, { zone: city.tz });
+          const set  = luxon.DateTime.fromISO(city.sunset,  { zone: city.tz });
+          sunEl.textContent = `Sunrise ${rise.toFormat('h:mm a')} · Sunset ${set.toFormat('h:mm a')}`;
+        } else {
+          sunEl.textContent = '';
+        }
+        // weather
+        const weatherEl = document.getElementById(`${city.id}-weather`);
+        if(city.weather !== undefined && city.code !== undefined){
+          const symbol = weatherSymbols[city.code] || { icon:'❓', desc:'Weather' };
+          weatherEl.innerHTML = `<span class="weather-icon">${symbol.icon}</span> ${symbol.desc}, ${city.weather != null ? city.weather.toFixed(1)+'°C' : ''}`;
+        }
       }
     }
 
-    // Fullscreen helper
-    async function toggleFullscreen(){
-      if (!document.fullscreenElement){
-        await document.documentElement.requestFullscreen().catch(()=>{});
-      } else {
-        await document.exitFullscreen().catch(()=>{});
+    // Update timeline table for day/night icons and highlight current Singapore hour
+    function updateTimeline(){
+      const nowSG = luxon.DateTime.now().setZone('Asia/Singapore');
+      const currentHourSG = nowSG.hour;
+      // iterate through each city and each hour
+      for(const city of cities){
+        for(let h=0; h<24; h++){
+          const cell = document.getElementById(`${city.id}-hour-${h}`);
+          // compute local hour at h relative to start of day
+          // create date at h:00 in local timezone for current date
+          const localDate = nowSG.setZone(city.tz).startOf('day').plus({ hours:h });
+          // determine day/night: if sunrise and sunset are defined
+          let isDay = true;
+          if(city.sunrise && city.sunset){
+            const rise = luxon.DateTime.fromISO(city.sunrise, { zone: city.tz });
+            const set  = luxon.DateTime.fromISO(city.sunset,  { zone: city.tz });
+            isDay = localDate >= rise && localDate < set;
+          }
+          cell.textContent = isDay ? '☀️' : '🌙';
+          cell.classList.remove('current');
+        }
+      }
+      // highlight the column corresponding to current hour in Singapore
+      for(const city of cities){
+        const cell = document.getElementById(`${city.id}-hour-${currentHourSG}`);
+        if(cell){
+          cell.classList.add('current');
+        }
       }
     }
 
-    // Initialise grid and view
-    buildGrid();
-    setMode('grid');
-    updatePlayButtons();
+    // Fetch weather for all cities and set sunrise/sunset
+    async function loadWeather(){
+      const promises = cities.map(async (city) => {
+        const data = await fetchWeatherData(city);
+        city.weather = data.temperature;
+        city.code    = data.code;
+        city.sunrise = data.sunrise;
+        city.sunset  = data.sunset;
+      });
+      await Promise.all(promises);
+    }
 
-    // Wire up UI controls
-    $('#gridBtn').addEventListener('click', () => setMode('grid'));
-    $('#slideBtn').addEventListener('click', () => setMode('slideshow'));
-    $('#playBtn').addEventListener('click', togglePlay);
-    $('#prevBtn').addEventListener('click', prev);
-    $('#nextBtn').addEventListener('click', next);
-    $('#fullBtn').addEventListener('click', toggleFullscreen);
-    $('#sPrev').addEventListener('click', prev);
-    $('#sPlay').addEventListener('click', togglePlay);
-    $('#sNext').addEventListener('click', next);
-
-    // Keyboard shortcuts
-    window.addEventListener('keydown', (e) => {
-      if (e.code === 'Space'){ e.preventDefault(); togglePlay(); }
-      if (e.key === 'ArrowRight') next();
-      if (e.key === 'ArrowLeft')  prev();
-      if (e.key.toLowerCase() === 'f') toggleFullscreen();
-      if (e.key.toLowerCase() === 'g') setMode('grid');
-      if (e.key.toLowerCase() === 's') setMode('slideshow');
-    });
+    // Initialize the board
+    async function init(){
+      document.getElementById('dateHeading').textContent = luxon.DateTime.now().toFormat('cccc, d LLLL yyyy');
+      renderCards();
+      renderTimeline();
+      await loadWeather();
+      updateCards();
+      updateTimeline();
+      // update time display and timeline every minute
+      setInterval(() => {
+        updateCards();
+        updateTimeline();
+      }, 60000);
+    }
+    init();
   </script>
 </body>
 </html>
