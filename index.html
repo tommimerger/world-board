@@ -289,31 +289,27 @@
 
     // Update timeline table for day/night icons and highlight current Singapore hour
     function updateTimeline(){
+      // Build a timeline showing the local time at each Singapore hour for every city.
+      // Remove day/night icons and display the local time (H:mm) in each cell. Highlight the
+      // cell whose hour matches the current local hour for that city.
       const nowSG = luxon.DateTime.now().setZone('Asia/Singapore');
-      const currentHourSG = nowSG.hour;
-      // iterate through each city and each hour
+      const sgStartOfDay = nowSG.startOf('day');
       for(const city of cities){
+        const nowLocal = luxon.DateTime.now().setZone(city.tz);
         for(let h=0; h<24; h++){
           const cell = document.getElementById(`${city.id}-hour-${h}`);
-          // compute local hour at h relative to start of day
-          // create date at h:00 in local timezone for current date
-          const localDate = nowSG.setZone(city.tz).startOf('day').plus({ hours:h });
-          // determine day/night: if sunrise and sunset are defined
-          let isDay = true;
-          if(city.sunrise && city.sunset){
-            const rise = luxon.DateTime.fromISO(city.sunrise, { zone: city.tz });
-            const set  = luxon.DateTime.fromISO(city.sunset,  { zone: city.tz });
-            isDay = localDate >= rise && localDate < set;
-          }
-          cell.textContent = isDay ? '☀️' : '🌙';
+          // compute the time in this city when it is h:00 in Singapore (start of the Singapore day)
+          const sgHourTime = sgStartOfDay.plus({ hours: h });
+          const localTime  = sgHourTime.setZone(city.tz);
+          // display the local time in H:mm format
+          cell.textContent = localTime.toFormat('H:mm');
+          // update highlight
           cell.classList.remove('current');
-        }
-      }
-      // highlight the column corresponding to current hour in Singapore
-      for(const city of cities){
-        const cell = document.getElementById(`${city.id}-hour-${currentHourSG}`);
-        if(cell){
-          cell.classList.add('current');
+          if(localTime.hour === nowLocal.hour){
+            cell.classList.add('current');
+            // override the text to show the exact current local time with minutes
+            cell.textContent = nowLocal.toFormat('H:mm');
+          }
         }
       }
     }
